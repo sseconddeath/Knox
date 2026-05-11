@@ -600,6 +600,11 @@ class MainWindow(QMainWindow):
         self._current_page_id = "дашборд"
         self._build_content()
         self.nav_to(self._current_page_id)
+        # Стартуем максимизированным — окно занимает всю доступную область
+        # экрана. Иначе на больших мониторах вокруг видны края, а на VM/
+        # ноутах с 1024×768 пользователь видит resize-границы по бокам.
+        # Состояние не сохраняется между запусками — каждый старт maximized.
+        self._open_maximized = True
 
         # 1s тик — чтобы автоскан стартовал в начало нужной минуты с
         # погрешностью ≤1с. Сама проверка дешёвая (две settings-cache
@@ -1363,14 +1368,26 @@ class MainWindow(QMainWindow):
         try:
             import ctypes
             hwnd = int(self.winId())
+            dwmapi = ctypes.windll.dwmapi
+            # Скруглённые углы (Win11).
             DWMWA_WINDOW_CORNER_PREFERENCE = 33
             DWMWCP_ROUND = 2
             pref = ctypes.c_int(DWMWCP_ROUND)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            dwmapi.DwmSetWindowAttribute(
                 hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
                 ctypes.byref(pref), ctypes.sizeof(pref))
+            # Убираем 1-px светлую границу, которую Win11 рисует по периметру
+            # frameless-окон по умолчанию. На дефолтном размере без неё окно
+            # выглядит как монолитный прямоугольник темы (а не «с белой
+            # линией по бокам, которую можно двигать»).
+            DWMWA_BORDER_COLOR = 34
+            DWMWA_COLOR_NONE   = 0xFFFFFFFE
+            color = ctypes.c_uint(DWMWA_COLOR_NONE)
+            dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_BORDER_COLOR,
+                ctypes.byref(color), ctypes.sizeof(color))
         except Exception as e:
-            print(f"[qt] dwm round failed: {e}", flush=True)
+            print(f"[qt] dwm style failed: {e}", flush=True)
 
 def _register_aumid_for_toasts():
     """Регистрирует AUMID в HKCU\\Software\\Classes\\AppUserModelId\\<AUMID>.
@@ -1435,7 +1452,12 @@ def main():
         f'* {{ font-family: "{family}"; font-weight: 600; }}'
     )
     win = MainWindow()
-    win.show()
+    # Стартуем максимизированным (см. MainWindow.__init__): занимает весь
+    # экран, нет видимых resize-границ по бокам и пустоты вокруг окна.
+    if getattr(win, "_open_maximized", False):
+        win.showMaximized()
+    else:
+        win.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
