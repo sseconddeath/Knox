@@ -1,4 +1,4 @@
-"""DataSentinel — Qt-версия (PySide6). Точка входа приложения."""
+"""Knox — Qt-версия (PySide6). Точка входа приложения."""
 from __future__ import annotations
 
 import os
@@ -58,10 +58,10 @@ SIDEBAR_W_OPEN = 220
 SIDEBAR_W_COLLAPSED = 64
 WINDOW_BTN_W = 50
 BURGER_SIZE = 26
-RESIZE_BORDER = 8
+RESIZE_BORDER = 4
 
 # Имя именованного канала (Win32 named pipe) для single-instance IPC.
-SINGLE_INSTANCE_KEY = "DataSentinel.SingleInstance.LocalServer"
+SINGLE_INSTANCE_KEY = "Knox.SingleInstance.LocalServer"
 # Файл с одноразовым токеном — отбивает случайные процессы, которые могли бы
 # слать "show" на канал. Файл лежит в user-only data/, перегенерируется на старте.
 IPC_TOKEN_FILE = "data/.ipc_token"
@@ -69,7 +69,7 @@ IPC_TOKEN_FILE = "data/.ipc_token"
 IPC_MAX_MSG = 256
 # AppUserModelID — должен совпадать в SetCurrentProcessExplicitAppUserModelID
 # и в winotify.Notification(app_id=...), иначе Windows не показывает toasts.
-APP_AUMID = "DataSentinel.App"
+APP_AUMID = "Knox.App"
 
 _NAV_SVG: dict[str, str] = {
     "дашборд": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
@@ -210,10 +210,16 @@ class TitleBar(QFrame):
         ico_path = _resource_path("icon.ico")
         if os.path.exists(ico_path):
             logo = QLabel(self)
-            # QIcon.pixmap выбирает ближайший размер из мульти-ICO (32×32),
-            # а не первую запись 256×256 — даёт чёткий рендер на мелком таргете.
+            # Берём наибольшее доступное разрешение из multi-ICO (256×256)
+            # и smooth-скейлим один раз вниз — даёт чёткий рендер при любом
+            # DPI без блюра от двойного скейла. Раньше Qt брал ближайший
+            # 24/32 и тянул вверх до 28 → выглядело размыто на VM/ноутбуках.
             dpr = self.devicePixelRatioF() or 1.0
-            pm = QIcon(ico_path).pixmap(QSize(28, 28) * dpr)
+            target_px = int(round(28 * dpr))
+            pm = QIcon(ico_path).pixmap(QSize(256, 256))
+            if pm.width() != target_px or pm.height() != target_px:
+                pm = pm.scaled(target_px, target_px,
+                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
             pm.setDevicePixelRatio(dpr)
             logo.setPixmap(pm)
             logo.setFixedSize(28, 28)
@@ -540,7 +546,16 @@ class MainWindow(QMainWindow):
         self._tray_scan.connect(lambda: self._start_scan(is_manual=True))
         self._tray_quit_sig.connect(self._tray_quit)
         self.setWindowTitle(cfg.APP_TITLE)
-        self.resize(cfg.WIDTH, cfg.HEIGHT)
+        # Минимум — чтобы layout не ломался на узких экранах (VM, ноутбуки 1366×768).
+        self.setMinimumSize(900, 600)
+        # Дефолт = cfg.WIDTH×HEIGHT, но НЕ больше доступной области экрана
+        # (минус 40 px на taskbar/margin). Без клампа на VM с 1024×768 окно
+        # уходит правым краем за пределы экрана — отсюда «правая сторона
+        # не работает», там просто не видно курсора.
+        screen = QApplication.primaryScreen().availableGeometry() if QApplication.primaryScreen() else None
+        target_w = min(cfg.WIDTH, screen.width() - 40) if screen else cfg.WIDTH
+        target_h = min(cfg.HEIGHT, screen.height() - 40) if screen else cfg.HEIGHT
+        self.resize(max(target_w, 900), max(target_h, 600))
         self._scan_thread = None
         self._scan_worker = None
 
@@ -694,7 +709,7 @@ class MainWindow(QMainWindow):
 
     def _check_auto_scan(self):
         import time
-        if self.db.get_setting("auto_scan_enabled", "1") != "1":
+        if self.db.get_setting("auto_scan_enabled", "0") != "1":
             return
         if self._scan_thread is not None and self._scan_thread.isRunning():
             return
@@ -733,25 +748,48 @@ class MainWindow(QMainWindow):
             self._tray_quit_sig.emit()
 
         menu = pystray.Menu(
-            TrayItem("Открыть DataSentinel", _show, default=True),
+            TrayItem("Открыть Knox", _show, default=True),
             TrayItem("Запустить мониторинг", _scan),
             pystray.Menu.SEPARATOR,
             TrayItem("Выйти", _quit),
         )
-        self._tray_icon = pystray.Icon("DataSentinel", tray_img, "DataSentinel", menu)
+        # Tooltip: на Windows pystray default-action срабатывает по double-click
+        # (одиночный клик показывает меню). Пишем явно, чтобы юзер не думал
+        # что приложение "не открывается".
+        self._tray_icon = pystray.Icon("Knox", tray_img,
+                                       "Knox — двойной клик чтобы открыть", menu)
         import threading
         threading.Thread(target=self._tray_icon.run, daemon=True).start()
 
     def _restore_from_tray(self):
         # Через Win32 SW_RESTORE — Qt's showNormal() для frameless+thickframe
         # не возвращает окно, если его HWND был уничтожен на hide().
+        # SetForegroundWindow часто блокируется Windows для процессов, которые
+        # сами не в фокусе — нужны обходы (topmost-flicker, attach-thread-input).
         if sys.platform == "win32":
             try:
                 hwnd = int(self.winId())
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
                 SW_RESTORE = 9
-                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
+                SW_SHOW    = 5
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.ShowWindow(hwnd, SW_SHOW)
+                # Обход блокировки SetForegroundWindow: коротко прикидываемся
+                # topmost-окном — Windows тогда принудительно выводит на передний план.
+                HWND_TOPMOST    = -1
+                HWND_NOTOPMOST  = -2
+                SWP_NOSIZE      = 0x0001
+                SWP_NOMOVE      = 0x0002
+                SWP_SHOWWINDOW  = 0x0040
+                user32.SetWindowPos(hwnd, HWND_TOPMOST,   0, 0, 0, 0,
+                                    SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
+                user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                                    SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+            except Exception as e:
+                print(f"[tray] restore failed: {e}", flush=True)
                 self.showNormal()
         else:
             self.showNormal()
@@ -759,7 +797,10 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         # Пока окно видно — трей не нужен; иначе приложение «в двух местах».
         if self._tray_icon is not None:
-            self._tray_icon.stop()
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
             self._tray_icon = None
 
     def _on_ipc_connection(self):
@@ -911,8 +952,17 @@ class MainWindow(QMainWindow):
 
             WM_NCHITTEST = 0x0084
             if msg.message == WM_NCHITTEST:
-                x = ctypes.c_short(msg.lParam & 0xFFFF).value
-                y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                # WM_NCHITTEST даёт физические пиксели в lParam, а frameGeometry()
+                # — логические (HighDpiScaling в Qt6). На дисплеях с DPI > 100%
+                # без масштабирования geo.right() - x уходит в минус и весь
+                # правый край ошибочно ловится как resize → клики не доходят
+                # до контента. Делим x/y на devicePixelRatio чтобы привести
+                # к той же системе координат, что и frameGeometry().
+                dpr = self.devicePixelRatioF() or 1.0
+                raw_x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                raw_y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                x = int(raw_x / dpr)
+                y = int(raw_y / dpr)
                 geo = self.frameGeometry()
                 b = RESIZE_BORDER
                 HTCLIENT = 1
@@ -1183,7 +1233,7 @@ class MainWindow(QMainWindow):
         else:
             # Toast только при автоскане — пользователь видит, что приложение
             # из трея реально работает. При ручном запуске тост избыточен.
-            self._toast("DataSentinel", "Фоновая проверка запущена")
+            self._toast("Knox", "Фоновая проверка запущена")
         self._scan_thread.start()
 
     def _scan_log(self, msg: str):
@@ -1247,16 +1297,16 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         if new_breaches:
-            self._toast("DataSentinel — Новые утечки!",
+            self._toast("Knox — Новые утечки!",
                         f"Найдено {len(new_breaches)} новых утечек "
                         f"(всего подтверждено: {leaks}).")
             self._send_email_notify(new_breaches, leaks)
         elif leaks:
-            self._toast("DataSentinel",
+            self._toast("Knox",
                         f"Проверка завершена. Подтверждено утечек: {leaks}, "
                         f"новых нет.")
         else:
-            self._toast("DataSentinel", "Проверка завершена. Утечек не найдено.")
+            self._toast("Knox", "Проверка завершена. Утечек не найдено.")
 
     def _send_email_notify(self, new_breaches: list, leaks: int):
         smtp = self.db.get_smtp()
@@ -1332,7 +1382,7 @@ def _register_aumid_for_toasts():
         key_path = f"Software\\Classes\\AppUserModelId\\{APP_AUMID}"
         ico_path = _resource_path("icon.ico")
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as k:
-            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "DataSentinel")
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "Knox")
             if os.path.exists(ico_path):
                 winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, ico_path)
     except Exception as e:
@@ -1368,7 +1418,7 @@ def main():
         probe.flush()
         probe.waitForBytesWritten(500)
         probe.disconnectFromServer()
-        print("[app] DataSentinel уже запущен — открываю окно.", flush=True)
+        print("[app] Knox уже запущен — открываю окно.", flush=True)
         return
     _ico = _resource_path("icon.ico")
     if os.path.exists(_ico):

@@ -1,4 +1,4 @@
-# DataSentinel
+# Knox
 
 Десктопное приложение для мониторинга утечек персональных данных. Проверяет email-адреса, номера телефонов, username'ы и пароли по 9+ открытым источникам, ведёт журнал инцидентов, шлёт уведомления о новых утечках и предоставляет AI-помощника для анализа.
 
@@ -44,7 +44,7 @@
 
 ### Для пользователей
 
-Скачайте `DataSentinel_Setup_X.X.X.exe` из [Releases](https://github.com/sseconddeath/DataSentinel/releases), запустите и следуйте инструкциям.
+Скачайте `Knox_Setup_X.X.X.exe` из [Releases](https://github.com/sseconddeath/Knox/releases), запустите и следуйте инструкциям.
 
 При установке можно опционально установить [Ollama](https://ollama.com) для локального AI-ассистента (вместо Groq).
 
@@ -53,8 +53,8 @@
 Требуется Python 3.11+ (тестировалось на 3.14) и Windows 10/11.
 
 ```bash
-git clone https://github.com/sseconddeath/DataSentinel.git
-cd DataSentinel
+git clone https://github.com/sseconddeath/Knox.git
+cd Knox
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -69,7 +69,7 @@ python main_qt.py
 build.bat
 ```
 
-Результат: `installer_output\DataSentinel_Setup_X.X.X.exe`
+Результат: `installer_output\Knox_Setup_X.X.X.exe`
 
 ## Стек
 

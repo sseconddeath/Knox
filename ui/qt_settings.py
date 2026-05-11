@@ -338,7 +338,7 @@ class SettingsPage(QWidget):
         row.addWidget(_label("Фоновая проверка", 14, cfg.TEXT_SECONDARY, card))
         row.addStretch(1)
 
-        saved_auto = self.db.get_setting("auto_scan_enabled", "1") == "1"
+        saved_auto = self.db.get_setting("auto_scan_enabled", "0") == "1"
         self._auto_enabled = saved_auto
         self._auto_switch = IOSSwitch(card, width=46, height=26)
         self._auto_switch.setChecked(saved_auto)

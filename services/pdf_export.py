@@ -257,7 +257,7 @@ def export_pdf_for_target(db, engine_cls, target_email: str, log_fn=None) -> boo
 
     story = []
 
-    story.append(Paragraph("DataSentinel — Отчёт об утечках", title_s))
+    story.append(Paragraph("Knox — Отчёт об утечках", title_s))
     story.append(_safe_para(f"Объект: {target_email}", heading))
     story.append(Paragraph(
         f"Сгенерирован: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}",
@@ -326,7 +326,7 @@ def export_pdf_for_target(db, engine_cls, target_email: str, log_fn=None) -> boo
 
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(
-        f"DataSentinel · {datetime.datetime.now().strftime('%d.%m.%Y')}",
+        f"Knox · {datetime.datetime.now().strftime('%d.%m.%Y')}",
         ParagraphStyle("footer", fontName=font, fontSize=8,
                        textColor=colors.HexColor("#888888"))))
 

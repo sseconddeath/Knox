@@ -470,6 +470,9 @@ class AIPage(QWidget):
             # Groq: ключ встроен в приложение, всегда готово.
             names = {"groq": "Groq · Llama 3.3 70B"}
             emit_status(cfg.SAFE_COLOR, f"Готово · {names.get(prov, prov)}")
+            # Прячем Ollama-кнопки если до этого был выбран Ollama —
+            # иначе они зависают в видимом состоянии при переключении.
+            emit_install("", "hide", "hide")
 
     def _on_status_changed(self, color: str, text: str):
         self._status_dot.setStyleSheet(

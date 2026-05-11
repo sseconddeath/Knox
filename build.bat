@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ============================================
-echo   DataSentinel — Сборка установщика
+echo   Knox — Сборка установщика
 echo ============================================
 echo.
 
@@ -26,7 +26,7 @@ echo.
 
 :: 3. PyInstaller — собираем .exe со встроенным ключом
 echo [3/4] PyInstaller...
-.venv\Scripts\pyinstaller.exe DataSentinel.spec
+.venv\Scripts\pyinstaller.exe Knox.spec
 set "PYI_ERR=%errorlevel%"
 
 :: ВАЖНО: stub возвращается ВСЕГДА, даже если PyInstaller упал,
@@ -56,8 +56,8 @@ if errorlevel 1 (
     ) else (
         echo.
         echo [!] Inno Setup не найден. Установите: https://jrsoftware.org/isdl.php
-        echo     Приложение собрано в dist\DataSentinel\
-        echo     Можно запустить dist\DataSentinel\DataSentinel.exe
+        echo     Приложение собрано в dist\Knox\
+        echo     Можно запустить dist\Knox\Knox.exe
         pause
         exit /b 0
     )
@@ -77,6 +77,6 @@ echo.
 
 echo ============================================
 echo   Готово!
-echo   Установщик: installer_output\DataSentinel_Setup_1.0.0.exe
+echo   Установщик: installer_output\Knox_Setup_1.0.0.exe
 echo ============================================
 pause

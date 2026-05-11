@@ -1,7 +1,7 @@
 # config.py — Design System для Data Leak Sentinel
 import os, sys
 
-APP_TITLE = "DataSentinel"
+APP_TITLE = "Knox"
 WIDTH     = 1300
 HEIGHT    = 820
 

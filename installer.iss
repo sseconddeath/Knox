@@ -1,17 +1,17 @@
-; DataSentinel — Inno Setup Script
+; Knox — Inno Setup Script
 ;
 ; Usage: build.bat does everything automatically, or run manually:
-;   1. pyinstaller DataSentinel.spec
+;   1. pyinstaller Knox.spec
 ;   2. iscc installer.iss
 
-#define MyAppName "DataSentinel"
+#define MyAppName "Knox"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "DataSentinel"
-#define MyAppURL "https://github.com/sseconddeath/DataSentinel"
-#define MyAppExeName "DataSentinel.exe"
+#define MyAppPublisher "Knox"
+#define MyAppURL "https://github.com/sseconddeath/Knox"
+#define MyAppExeName "Knox.exe"
 
 [Setup]
-AppId={{B5E2F8A1-3C4D-4E6F-9A1B-2C3D4E5F6A7B}
+AppId={{47EFED1F-8824-425D-8455-A57442E237A4}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -21,7 +21,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer_output
-OutputBaseFilename=DataSentinel_Setup_{#MyAppVersion}
+OutputBaseFilename=Knox_Setup_{#MyAppVersion}
 SetupIconFile=icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -40,7 +40,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "installollama"; Description: "Установить Ollama (AI-ассистент, ~800 МБ)"; GroupDescription: "Дополнительно:"
 
 [Files]
-Source: "dist\DataSentinel\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Knox\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -48,5 +48,5 @@ Name: "{group}\Удалить {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Запустить DataSentinel"; Flags: nowait postinstall skipifsilent
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& {{ Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '$env:TEMP\OllamaSetup.exe'; Start-Process '$env:TEMP\OllamaSetup.exe' -Wait }}"""; StatusMsg: "Установка Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Description: "Запустить Knox"; Flags: nowait postinstall skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& {{ Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '$env:TEMP\OllamaSetup.exe'; Start-Process '$env:TEMP\OllamaSetup.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait }}"""; StatusMsg: "Скачиваю и устанавливаю Ollama (~800 МБ, несколько минут)..."; Tasks: installollama; Flags: runhidden waituntilterminated

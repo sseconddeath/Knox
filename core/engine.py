@@ -73,7 +73,7 @@ class LeakEngine:
 
     @staticmethod
     def get_headers():
-        return {"User-Agent": "DataSentinel/1.0", "Accept": "application/json"}
+        return {"User-Agent": "Knox/1.0", "Accept": "application/json"}
 
     @staticmethod
     def check_hibp_pass(value: str):
