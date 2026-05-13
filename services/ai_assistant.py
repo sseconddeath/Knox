@@ -49,15 +49,32 @@ class OllamaAssistant:
     def is_on_disk() -> bool:
         """Установлена ли Ollama физически на диске."""
         import os, shutil
-        if shutil.which("ollama"):
-            return True
+        # shutil.which может выловить WindowsApps-стаб — 0-байтовый
+        # reparse-point в %LOCALAPPDATA%\Microsoft\WindowsApps\ который
+        # при запуске открывает Store. Отфильтровываем его явно.
+        found = shutil.which("ollama")
+        if found:
+            try:
+                size = os.path.getsize(found)
+            except OSError:
+                size = 0
+            if size > 0 and "WindowsApps" not in found:
+                return True
         local = os.environ.get("LOCALAPPDATA", "")
         prog  = os.environ.get("PROGRAMFILES", "")
         paths = [
             os.path.join(local, "Programs", "Ollama", "ollama.exe"),
             os.path.join(prog,  "Ollama", "ollama.exe"),
         ]
-        return any(os.path.exists(p) for p in paths)
+        # Не просто os.path.exists — заодно требуем что файл не пустой
+        # (мусор от прерванной установки или WindowsApps-стаб не считаем).
+        for p in paths:
+            try:
+                if os.path.exists(p) and os.path.getsize(p) > 0:
+                    return True
+            except OSError:
+                pass
+        return False
 
     @staticmethod
     def is_running() -> bool:
