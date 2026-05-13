@@ -95,17 +95,67 @@ class OllamaAssistant:
         except Exception as e: return False, str(e)
 
     @staticmethod
-    def install_windows():
-        # Не качаем и не запускаем установщик автоматически: без проверки
-        # подписи это вектор RCE при компрометации CDN. Просто открываем
-        # официальный сайт в браузере — пользователь скачивает и ставит сам,
-        # с видимыми SmartScreen/проверкой подписи Windows.
+    def install_windows(progress_callback=None):
+        """Качает OllamaSetup.exe в %TEMP% и запускает в /VERYSILENT режиме.
+        Установщик Ollama подписан Ollama Inc — Windows валидирует подпись
+        при загрузке exe, так что прямой запуск через subprocess безопасен
+        (HTTPS + Authenticode цепочка). До v1.0.4 здесь открывался браузер
+        со страницей загрузки — это вынуждало юзера качать вручную, закрывать
+        приложение, перезапускать; теперь весь поток внутри приложения.
+
+        progress_callback(text, pct_or_None) — для UI-прогресса. pct=None
+        в фазе install (длительность непредсказуема, прогресс-бар оставляем
+        с последним значением)."""
+        import tempfile
+        import subprocess
+        url = "https://ollama.com/download/OllamaSetup.exe"
         try:
-            import webbrowser
-            webbrowser.open_new_tab("https://ollama.com/download/windows")
-            return True, "Открыта страница Ollama. Скачайте и установите, затем перезапустите приложение."
+            r = requests.get(url, stream=True, timeout=60,
+                             allow_redirects=True)
+            if r.status_code != 200:
+                return False, f"Не удалось скачать Ollama: HTTP {r.status_code}"
+            total = int(r.headers.get("Content-Length") or 0)
+            dest = os.path.join(tempfile.gettempdir(), "OllamaSetup.exe")
+            received = 0
+            with open(dest, "wb") as f:
+                for chunk in r.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    received += len(chunk)
+                    f.write(chunk)
+                    if progress_callback:
+                        if total:
+                            mb_r = received / (1024 * 1024)
+                            mb_t = total / (1024 * 1024)
+                            progress_callback(
+                                f"Скачиваю Ollama — "
+                                f"{mb_r:.0f} / {mb_t:.0f} МБ",
+                                received / total)
+                        else:
+                            mb_r = received / (1024 * 1024)
+                            progress_callback(
+                                f"Скачиваю Ollama — {mb_r:.0f} МБ",
+                                None)
+            if progress_callback:
+                progress_callback(
+                    "Устанавливаю Ollama (~1-2 минуты)...", None)
+            # /VERYSILENT — без UI, /SUPPRESSMSGBOXES — без подтверждений,
+            # /NORESTART — нам не нужна перезагрузка системы. Ollama
+            # ставится в per-user %LOCALAPPDATA%\Programs\Ollama, UAC не
+            # запрашивается.
+            proc = subprocess.run(
+                [dest, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+                timeout=600,
+            )
+            if proc.returncode != 0:
+                return False, (f"Установщик Ollama завершился с ошибкой "
+                               f"(код {proc.returncode})")
+            return True, ("Ollama установлена! Теперь нажмите "
+                          "«Скачать модель» — это ещё ~5 ГБ.")
+        except subprocess.TimeoutExpired:
+            return False, "Установщик Ollama не ответил за 10 минут."
         except Exception as e:
-            return False, str(e)
+            return False, f"Ошибка установки Ollama: {e}"
 
     @staticmethod
     def ask(question, context, stream_callback=None):

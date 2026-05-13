@@ -530,12 +530,28 @@ class AIPage(QWidget):
             return
 
         self._install_btn.setText("Устанавливаем...")
+        self._progress_bar.show()
+        self._progress_bar.setValue(0)
         self._ai_append("Система",
-                        "Запускаю установку Ollama...\nПосле — перезапустите приложение.")
+                        "Скачиваю Ollama (~750 МБ) и устанавливаю автоматически.\n"
+                        "После установки нажми «Скачать модель» (~5 ГБ).")
+
+        def _progress(text, pct):
+            # pct=None → -1.0 в _on_progress, чтобы не сбивать бар к нулю
+            # в фазе install (длится 1-2 минуты, прогресс предсказать
+            # нельзя — оставляем последнее значение).
+            self.progressUpdate.emit(
+                text or "",
+                float(pct) if pct is not None else -1.0,
+            )
 
         def _do():
-            ok, msg = ai_mod.OllamaAssistant.install_windows()
+            ok, msg = ai_mod.OllamaAssistant.install_windows(
+                progress_callback=_progress)
             self.appendMessage.emit("Система", msg)
+            # После установки перепроверяем статус — это покажет
+            # «Скачать модель» автоматически, если Ollama завелась.
+            threading.Thread(target=self._check_status, daemon=True).start()
         threading.Thread(target=_do, daemon=True).start()
 
     def _download_model(self):
@@ -556,6 +572,10 @@ class AIPage(QWidget):
 
     def _on_progress(self, text: str, pct: float):
         self._progress_lbl.setText(text)
+        # pct<0 — «не знаю сколько»; оставляем бар как есть, обновляем
+        # только текстовую подпись (для install-фазы Ollama, конца pull'а).
+        if pct < 0:
+            return
         self._progress_bar.setValue(int(pct * 100 if pct <= 1 else pct))
 
     def _quick_ask(self, prompt: str):
