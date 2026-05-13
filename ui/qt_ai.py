@@ -248,6 +248,11 @@ class AIPage(QWidget):
         # Цвета QTextCharFormat запекаются в момент вставки, чтобы они
         # обновились — приходится перерисовать весь документ.
         self._chat_log: list[tuple[str, str]] = []
+        # Буфер строк AI-ответа в текущем стриме. Заполняется в
+        # _ai_stream_line, сливается в _chat_log по _on_stream_done.
+        # Без этого AI-ответы пропадали при смене темы (стрим идёт
+        # мимо _ai_append, который единственный пишет в лог).
+        self._streaming_lines: list[str] = []
 
         saved_prov = self.db.get_setting("ai_provider", "groq")
         self._set_provider_ui(saved_prov)
@@ -592,6 +597,7 @@ class AIPage(QWidget):
         self._ai_append("Вы", q)
 
         self._append_sender("Скиппи", "ai")
+        self._streaming_lines = []  # копим тут чтобы запомнить ответ
         buf = [""]
 
         def _chunk(chunk: str):
@@ -630,6 +636,12 @@ class AIPage(QWidget):
         self.chat.ensureCursorVisible()
         self.send_btn.setEnabled(True)
         self.send_btn.setText("→")
+        # Запоминаем ответ в логе для apply_theme() — иначе при смене
+        # темы Dark↔Light AI-сообщения пропадают (см. _chat_log).
+        if self._streaming_lines:
+            text = "\n".join(self._streaming_lines)
+            self._chat_log.append(("Скиппи", text))
+            self._streaming_lines = []
 
     def _append_sender(self, sender: str, kind: str):
         cur = self.chat.textCursor()
@@ -677,6 +689,7 @@ class AIPage(QWidget):
             self._ai_append(sender, text)
 
     def _ai_stream_line(self, line: str):
+        self._streaming_lines.append(line)
         self._render_line(line)
         self.chat.ensureCursorVisible()
 
