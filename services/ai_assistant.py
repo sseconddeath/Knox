@@ -105,6 +105,10 @@ class OllamaAssistant:
             r = requests.post(f"{OllamaAssistant.OLLAMA_URL}/api/pull",
                 json={"name": OllamaAssistant.MODEL, "stream": True},
                 stream=True, timeout=3600)
+            if r.status_code != 200:
+                return False, (
+                    f"Ollama вернула HTTP {r.status_code}. "
+                    f"Перезапустите Ollama через трей и попробуйте снова.")
             # Ollama тянет модель не одним файлом, а несколькими слоями
             # (manifest + ~4.5GB веса + tokenizer + ...). Раньше мы
             # репортили % текущего слоя — поэтому бар скакал 50→41 при
@@ -113,10 +117,17 @@ class OllamaAssistant:
             totals: dict[str, int] = {}
             done: dict[str, int] = {}
             last_pct = 0.0
+            got_progress = False
             for line in r.iter_lines():
                 if not line:
                     continue
                 data = json.loads(line)
+                # Ollama может в любой момент прислать {"error": "..."}
+                # — раньше мы это игнорировали, цикл доходил до конца
+                # без status=success, и юзер видел ложное «Готово».
+                err = data.get("error")
+                if err:
+                    return False, f"Ollama: {err}"
                 status = data.get("status", "")
                 digest = data.get("digest", "")
                 t = int(data.get("total", 0) or 0)
@@ -124,6 +135,7 @@ class OllamaAssistant:
                 if digest and t > 0:
                     totals[digest] = t
                     done[digest] = c
+                    got_progress = True
                 if progress_callback:
                     grand_total = sum(totals.values())
                     grand_done = sum(done.values())
@@ -141,6 +153,13 @@ class OllamaAssistant:
                         progress_callback(status, None)
                 if data.get("status") == "success":
                     return True, "Модель загружена!"
+            # Стрим закрылся без явного success и без error. Раньше
+            # это превращалось в фолсовое «Готово» — кнопка возвращалась,
+            # юзер думал что модель скачана, а её нет.
+            if not got_progress:
+                return False, (
+                    "Ollama закрыла соединение без скачивания. "
+                    "Перезапустите Ollama через трей и попробуйте снова.")
             return True, "Готово"
         except Exception as e:
             return False, str(e)
