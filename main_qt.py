@@ -5,7 +5,7 @@ import os
 import sys
 
 from PySide6.QtCore import (
-    Qt, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve, Property, QEvent, QTimer, Signal,
+    Qt, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve, Property, QEvent, QTimer, Signal, QObject,
 )
 from PySide6.QtGui import (
     QIcon, QPixmap, QPainter, QColor, QFont, QFontDatabase, QMouseEvent,
@@ -13,7 +13,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy, QSpacerItem,
-    QGraphicsDropShadowEffect, QMessageBox,
+    QGraphicsDropShadowEffect, QMessageBox, QDialog, QProgressBar,
 )
 
 import ctypes
@@ -21,6 +21,12 @@ import ctypes.wintypes
 
 import core.config as cfg
 from core.database import DBManager
+from core.version import VERSION as APP_VERSION
+try:
+    from services import updater
+    UPDATER_OK = True
+except Exception:
+    UPDATER_OK = False
 from ui.qt_dashboard import DashboardPage
 from ui.qt_manager import ManagerPage
 from ui.qt_journal import JournalPage
@@ -535,6 +541,205 @@ class PagePlaceholder(QWidget):
         lay.addWidget(hint)
         lay.addStretch(1)
 
+class UpdateCheckWorker(QObject):
+    """Фоновая проверка обновлений на GitHub Releases. Эмитит found(info)
+    если найдена более новая версия (см. services.updater.check_for_update),
+    иначе done() без аргументов."""
+    found = Signal(dict)
+    done = Signal()
+
+    def run(self):
+        if not UPDATER_OK:
+            self.done.emit()
+            return
+        try:
+            info = updater.check_for_update()
+        except Exception:
+            info = None
+        if info:
+            self.found.emit(info)
+        else:
+            self.done.emit()
+
+
+class UpdateBanner(QFrame):
+    """Узкая плашка-уведомление между titlebar и body. По клику на
+    «Обновить» открывает UpdateProgressDialog. «Позже» прячет до
+    следующего запуска."""
+    updateClicked = Signal()
+    laterClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("updateBanner")
+        self.setFixedHeight(40)
+        self.setStyleSheet(
+            f"QFrame#updateBanner {{ background:{cfg.ACCENT};"
+            f" border:none; }}"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 0, 12, 0)
+        lay.setSpacing(10)
+
+        self._msg = QLabel("Доступно обновление", self)
+        self._msg.setStyleSheet(
+            "font-family:'Geist'; color:white; font-size:13px;"
+            " font-weight:600; background:transparent;"
+        )
+        lay.addWidget(self._msg)
+        lay.addStretch(1)
+
+        upd = QPushButton("Обновить", self)
+        upd.setCursor(Qt.PointingHandCursor)
+        upd.setFixedHeight(26)
+        upd.setStyleSheet(
+            "QPushButton { font-family:'Geist'; background:white;"
+            f" color:{cfg.ACCENT}; border:none; border-radius:4px;"
+            " padding:0 14px; font-size:12px; font-weight:700; }"
+            " QPushButton:hover { background:#f0f0f0; }"
+        )
+        upd.clicked.connect(self.updateClicked.emit)
+        lay.addWidget(upd)
+
+        later = QPushButton("Позже", self)
+        later.setCursor(Qt.PointingHandCursor)
+        later.setFixedHeight(26)
+        later.setStyleSheet(
+            "QPushButton { font-family:'Geist'; background:transparent;"
+            " color:white; border:1px solid rgba(255,255,255,0.5);"
+            " border-radius:4px; padding:0 12px; font-size:12px;"
+            " font-weight:600; }"
+            " QPushButton:hover { background:rgba(255,255,255,0.15); }"
+        )
+        later.clicked.connect(self.laterClicked.emit)
+        lay.addWidget(later)
+
+        self.hide()
+
+    def show_for(self, version: str):
+        self._msg.setText(f"Доступна новая версия Knox {version}")
+        self.show()
+
+
+class UpdateProgressDialog(QDialog):
+    """Модальное окно: качает инсталлятор с прогресс-баром,
+    при успехе запускает его и закрывает приложение."""
+    progressUpdate = Signal(int, int)
+    downloadDone = Signal(str)  # path, "" при ошибке
+    downloadFailed = Signal()
+
+    def __init__(self, info: dict, parent=None):
+        super().__init__(parent)
+        self._info = info
+        self.setWindowTitle(f"Обновление Knox {info.get('version', '')}")
+        self.setFixedSize(420, 180)
+        self.setStyleSheet(f"background:{cfg.BG_SURFACE};")
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 22, 24, 22)
+        lay.setSpacing(14)
+
+        title = QLabel(f"Скачиваю Knox {info.get('version', '')}", self)
+        title.setStyleSheet(
+            f"font-family:'Geist'; color:{cfg.TEXT_PRIMARY};"
+            " font-size:16px; font-weight:700; background:transparent;"
+        )
+        lay.addWidget(title)
+
+        self._status = QLabel("Подключение к GitHub...", self)
+        self._status.setStyleSheet(
+            f"font-family:'Geist'; color:{cfg.TEXT_SECONDARY};"
+            " font-size:12px; background:transparent;"
+        )
+        lay.addWidget(self._status)
+
+        self._bar = QProgressBar(self)
+        self._bar.setFixedHeight(8)
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        self._bar.setStyleSheet(
+            "QProgressBar {"
+            f" background:{cfg.BORDER}; border:none; border-radius:4px; }}"
+            "QProgressBar::chunk {"
+            f" background:{cfg.ACCENT}; border-radius:4px; }}"
+        )
+        lay.addWidget(self._bar)
+        lay.addStretch(1)
+
+        self._cancel_btn = QPushButton("Отмена", self)
+        self._cancel_btn.setCursor(Qt.PointingHandCursor)
+        self._cancel_btn.setFixedHeight(32)
+        self._cancel_btn.setStyleSheet(
+            "QPushButton { font-family:'Geist';"
+            f" background:{cfg.BG_ELEVATED}; color:{cfg.TEXT_PRIMARY};"
+            f" border:1px solid {cfg.BORDER}; border-radius:6px;"
+            " padding:0 16px; font-size:12px; }"
+            f" QPushButton:hover {{ border:1px solid {cfg.BORDER_HOVER}; }}"
+        )
+        self._cancel_btn.clicked.connect(self.reject)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._cancel_btn)
+        lay.addLayout(btn_row)
+
+        self.progressUpdate.connect(self._on_progress)
+        self.downloadDone.connect(self._on_done)
+        self.downloadFailed.connect(self._on_failed)
+
+        # Запускаем скачивание в фоне сразу при открытии.
+        self._thread = QThread(self)
+        self._worker = _DownloadWorker(info["url"], self)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._thread.start()
+
+    def _on_progress(self, received: int, total: int):
+        if total > 0:
+            pct = int(received / total * 100)
+            self._bar.setValue(pct)
+            mb_r = received / (1024 * 1024)
+            mb_t = total / (1024 * 1024)
+            self._status.setText(f"{mb_r:.1f} / {mb_t:.1f} МБ ({pct}%)")
+        else:
+            self._status.setText(f"{received / (1024 * 1024):.1f} МБ")
+
+    def _on_done(self, path: str):
+        self._status.setText("Запускаю установку...")
+        self._bar.setValue(100)
+        self._cancel_btn.setEnabled(False)
+        # Через секунду стартуем инсталлятор и выходим. Inno Setup
+        # сам закроет наш процесс через CloseApplications=force.
+        QTimer.singleShot(800, lambda: updater.launch_installer_and_quit(path))
+
+    def _on_failed(self):
+        self._status.setText("Не удалось скачать обновление. "
+                             "Проверьте интернет и попробуйте позже.")
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._cancel_btn.setText("Закрыть")
+
+
+class _DownloadWorker(QObject):
+    """Качает инсталлятор и эмитит сигналы в UpdateProgressDialog
+    (через self._dlg, который живёт в main thread)."""
+    def __init__(self, url: str, dlg: "UpdateProgressDialog"):
+        super().__init__()
+        self._url = url
+        self._dlg = dlg
+
+    def run(self):
+        def _on_prog(received, total):
+            self._dlg.progressUpdate.emit(received, total)
+        path = updater.download_installer(self._url, on_progress=_on_prog) \
+            if UPDATER_OK else None
+        if path:
+            self._dlg.downloadDone.emit(path)
+        else:
+            self._dlg.downloadFailed.emit()
+
+
 class MainWindow(QMainWindow):
     _tray_show = Signal()
     _tray_scan = Signal()
@@ -648,6 +853,40 @@ class MainWindow(QMainWindow):
             QLocalServer.removeServer(SINGLE_INSTANCE_KEY)
             self._ipc_server.listen(SINGLE_INSTANCE_KEY)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
+
+        # Авто-проверка обновлений через 5 секунд после старта —
+        # чтобы не тормозить запуск и дать UI отрисоваться. Не блокирует
+        # ничего, без интернета молча отваливается.
+        self._update_thread = None
+        self._update_worker = None
+        QTimer.singleShot(5_000, self._check_for_update_async)
+
+    def _check_for_update_async(self):
+        if not UPDATER_OK:
+            return
+        # Сохраняем ссылки на QThread/worker как атрибуты, иначе GC
+        # снесёт их до того как сигналы успеют долететь.
+        self._update_thread = QThread(self)
+        self._update_worker = UpdateCheckWorker()
+        self._update_worker.moveToThread(self._update_thread)
+        self._update_thread.started.connect(self._update_worker.run)
+        self._update_worker.found.connect(self._on_update_found)
+        self._update_worker.found.connect(self._update_thread.quit)
+        self._update_worker.done.connect(self._update_thread.quit)
+        self._update_thread.finished.connect(self._update_worker.deleteLater)
+        self._update_thread.finished.connect(self._update_thread.deleteLater)
+        self._update_thread.start()
+
+    def _on_update_found(self, info: dict):
+        self._pending_update = info
+        self.update_banner.show_for(info.get("version", ""))
+
+    def _start_update(self):
+        info = getattr(self, "_pending_update", None)
+        if not info:
+            return
+        dlg = UpdateProgressDialog(info, self)
+        dlg.exec()
 
     def _log(self, msg: str):
         print(f"[app] {msg}", flush=True)
@@ -1030,6 +1269,11 @@ class MainWindow(QMainWindow):
 
         self.titlebar = TitleBar(self)
         root_lay.addWidget(self.titlebar)
+
+        self.update_banner = UpdateBanner(root)
+        self.update_banner.updateClicked.connect(self._start_update)
+        self.update_banner.laterClicked.connect(self.update_banner.hide)
+        root_lay.addWidget(self.update_banner)
 
         body = QWidget(root)
         body.setStyleSheet(f"background:{cfg.BG_SURFACE};")

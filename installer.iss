@@ -30,6 +30,10 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; Auto-updater запускает инсталлятор пока Knox.exe ещё работает —
+; force-закрываем его, иначе Inno не сможет переписать файлы.
+CloseApplications=force
+CloseApplicationsFilter=*.exe,*.dll,*.pyd
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
@@ -48,5 +52,7 @@ Name: "{group}\Удалить {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Запустить Knox"; Flags: nowait postinstall skipifsilent
+; Без skipifsilent — auto-updater запускает инсталлятор в /SILENT,
+; и нам нужно чтобы он перезапустил Knox.exe после обновления.
+Filename: "{app}\{#MyAppExeName}"; Description: "Запустить Knox"; Flags: nowait postinstall
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& {{ Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '$env:TEMP\OllamaSetup.exe'; Start-Process '$env:TEMP\OllamaSetup.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait }}"""; StatusMsg: "Скачиваю и устанавливаю Ollama (~800 МБ, несколько минут)..."; Tasks: installollama; Flags: runhidden waituntilterminated
