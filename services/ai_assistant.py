@@ -99,17 +99,47 @@ class OllamaAssistant:
     def pull_model(progress_callback=None):
         try:
             r = requests.post(f"{OllamaAssistant.OLLAMA_URL}/api/pull",
-                json={"name": OllamaAssistant.MODEL, "stream": True}, stream=True, timeout=3600)
+                json={"name": OllamaAssistant.MODEL, "stream": True},
+                stream=True, timeout=3600)
+            # Ollama тянет модель не одним файлом, а несколькими слоями
+            # (manifest + ~4.5GB веса + tokenizer + ...). Раньше мы
+            # репортили % текущего слоя — поэтому бар скакал 50→41 при
+            # переходе на следующий блоб. Теперь суммируем по всем
+            # слоям + запрещаем шкале откатываться назад.
+            totals: dict[str, int] = {}
+            done: dict[str, int] = {}
+            last_pct = 0.0
             for line in r.iter_lines():
-                if not line: continue
+                if not line:
+                    continue
                 data = json.loads(line)
-                status, total, completed = data.get("status",""), data.get("total",0), data.get("completed",0)
+                status = data.get("status", "")
+                digest = data.get("digest", "")
+                t = int(data.get("total", 0) or 0)
+                c = int(data.get("completed", 0) or 0)
+                if digest and t > 0:
+                    totals[digest] = t
+                    done[digest] = c
                 if progress_callback:
-                    if total > 0: progress_callback(f"{status} — {int(completed/total*100)}% ({total/1024**3:.1f} GB)", completed/total)
-                    else: progress_callback(status, None)
-                if data.get("status") == "success": return True, "Модель загружена!"
+                    grand_total = sum(totals.values())
+                    grand_done = sum(done.values())
+                    if grand_total > 0:
+                        pct = grand_done / grand_total
+                        if pct < last_pct:
+                            pct = last_pct
+                        last_pct = pct
+                        gb = grand_total / 1024**3
+                        progress_callback(
+                            f"Скачиваю модель — {int(pct*100)}% "
+                            f"({gb:.1f} GB)",
+                            pct)
+                    else:
+                        progress_callback(status, None)
+                if data.get("status") == "success":
+                    return True, "Модель загружена!"
             return True, "Готово"
-        except Exception as e: return False, str(e)
+        except Exception as e:
+            return False, str(e)
 
     @staticmethod
     def install_windows(progress_callback=None):
