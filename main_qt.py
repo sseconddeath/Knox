@@ -473,6 +473,17 @@ class Sidebar(QFrame):
 
         lay.addStretch(1)
 
+        # Версия + клик открывает страницу релизов на GitHub. Так юзер
+        # быстро видит на чём он сидит и может глянуть changelog.
+        self.version_lbl = QLabel(f"Knox v{APP_VERSION}", self)
+        self.version_lbl.setCursor(Qt.PointingHandCursor)
+        self.version_lbl.setAlignment(Qt.AlignCenter)
+        self.version_lbl.setFixedHeight(28)
+        self.version_lbl.setToolTip("Открыть страницу релизов на GitHub")
+        self.version_lbl.setStyleSheet(self._version_qss())
+        self.version_lbl.mousePressEvent = self._on_version_click
+        lay.addWidget(self.version_lbl)
+
         # Анимация ширины
         self._anim = QPropertyAnimation(self, b"maximumWidth")
         self._anim.setDuration(480)
@@ -494,6 +505,11 @@ class Sidebar(QFrame):
         self.section_lbl.setText("" if self._collapsed else "НАВИГАЦИЯ")
         for btn in self.buttons.values():
             btn.set_collapsed(self._collapsed)
+        # При свёрнутом сайдбаре «Knox v1.0.2» не влезает по ширине —
+        # показываем только саму версию.
+        self.version_lbl.setText(
+            f"v{APP_VERSION}" if self._collapsed else f"Knox v{APP_VERSION}"
+        )
 
     def set_active(self, page_id: str):
         for pid, btn in self.buttons.items():
@@ -523,6 +539,22 @@ class Sidebar(QFrame):
         return (f"font-family:'Geist'; color:{cfg.TEXT_MUTED};"
                 f" font-size:10px; font-weight:700; letter-spacing:1px;"
                 f" background:transparent; padding:6px;")
+
+    def _version_qss(self) -> str:
+        # :hover через QLabel-styling нельзя выставить через setStyleSheet
+        # на сам label (только через дочерние селекторы). Hover-эффект делаем
+        # вручную в eventFilter, но мне лень — ограничимся курсором-указателем.
+        return (f"QLabel {{ font-family:'Geist'; color:{cfg.TEXT_MUTED};"
+                f" font-size:11px; background:transparent; }}"
+                f"QLabel:hover {{ color:{cfg.TEXT_PRIMARY}; }}")
+
+    def _on_version_click(self, ev):
+        import webbrowser
+        try:
+            webbrowser.open_new_tab(
+                "https://github.com/sseconddeath/Knox/releases")
+        except Exception:
+            pass
 
 class PagePlaceholder(QWidget):
     def __init__(self, title: str, parent=None):
