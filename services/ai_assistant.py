@@ -244,15 +244,19 @@ class OllamaAssistant:
     @staticmethod
     def ask(question, context, stream_callback=None):
         try:
-            # 180s вместо 120: первый запрос после `pull` может ждать
-            # загрузку модели в RAM/VRAM до минуты на медленных VM —
-            # с 120s мы бы рвали соединение пока модель ещё грузилась.
+            # 600s (10 мин) на cold-load. После рестарта VM / свежего
+            # pull'а Ollama читает ~5 ГБ модели с диска в RAM и до
+            # первого байта ответа может ждать 5-7 минут тишины на
+            # слабых VM (HDD-image, мало CPU). 180s раньше срабатывало
+            # Read timeout раньше, чем модель успевала прогрузиться.
+            # После первого прогрева модель сидит в RAM и ответы
+            # мгновенные.
             r = requests.post(f"{OllamaAssistant.OLLAMA_URL}/api/chat",
                 json={"model": OllamaAssistant.MODEL, "stream": True,
                       "options": {"temperature": 0.7, "num_ctx": 8192, "num_predict": 4096},
                       "messages": [{"role":"system","content":SYSTEM_PROMPT},
                                    {"role":"user","content":f"[Справочные данные об утечках пользователя — используй ТОЛЬКО если вопрос про безопасность]\n{context}\n\n=== ВОПРОС ===\n{question}"}]},
-                stream=True, timeout=180)
+                stream=True, timeout=600)
             if r.status_code != 200:
                 msg = (f"Ollama вернула HTTP {r.status_code}. "
                        f"Перезапустите Ollama через трей.")
