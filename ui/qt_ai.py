@@ -205,7 +205,7 @@ class AIPage(QWidget):
             f"font-weight:700; background:transparent;"
         )
         outer.addWidget(title)
-        subtitle = QLabel("Анализ безопасности с искусственным интеллектом", self)
+        subtitle = QLabel("Универсальный помощник с искусственным интеллектом", self)
         subtitle.setStyleSheet(
             f"font-family:'Geist'; color:{cfg.TEXT_SECONDARY};"
             f"font-size:14px; background:transparent;"
@@ -253,9 +253,10 @@ class AIPage(QWidget):
         self._set_provider_ui(saved_prov)
         self._ai_append(
             "Скиппи",
-            "Привет! Я Скиппи — твой AI-помощник по кибербезопасности.\n"
-            "Отвечаю на основе реальных данных из вашего журнала утечек.\n\n"
-            "Выберите провайдера слева, введите ключ и задайте вопрос.\n"
+            "Привет! Я Скиппи — твой AI-помощник.\n"
+            "Спрашивай что угодно: математика, программирование, общие\n"
+            "знания, бытовые советы. Если вопрос про твою безопасность —\n"
+            "учту данные из журнала утечек.\n\n"
             "Groq — бесплатно и быстро, Ollama — локально без интернета."
         )
         threading.Thread(target=self._check_status, daemon=True).start()
@@ -403,7 +404,7 @@ class AIPage(QWidget):
 
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
-        self.input = _input("Задайте вопрос о вашей безопасности...", parent=card)
+        self.input = _input("Задай любой вопрос — Скиппи поможет...", parent=card)
         self.input.setFixedHeight(40)
         self.input.returnPressed.connect(self._send)
         input_row.addWidget(self.input, 1)
