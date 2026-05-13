@@ -511,21 +511,26 @@ class AIPage(QWidget):
         if "Открыть" in self._install_btn.text():
             self._install_btn.setText("Запускаем...")
             self._ai_append("Система", "Запускаю Ollama... подождите 5 секунд.")
+            # Запускаем по ПОЛНОМУ пути, не через `ollama` в PATH —
+            # иначе Windows может подсунуть WindowsApps-стаб (открыл
+            # бы консоль с рекламой Claude Code / OpenClaw вместо
+            # реального daemon'а).
+            exe = ai_mod.OllamaAssistant.find_exe()
+            if not exe:
+                self._ai_append("Система",
+                                "Не нашёл ollama.exe. Переустановите Ollama "
+                                "через кнопку «Установить Ollama».")
+                self._install_btn.setEnabled(True)
+                return
             try:
                 subprocess.Popen(
-                    ["ollama", "serve"],
+                    [exe, "serve"],
                     creationflags=0x08000000 if os.name == "nt" else 0,
                 )
-            except Exception:
-                path = os.path.expandvars(
-                    r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
-                if os.path.exists(path):
-                    subprocess.Popen([path])
-                else:
-                    self._ai_append("Система",
-                                    "Откройте Ollama вручную через меню Пуск.")
-                    self._install_btn.setEnabled(True)
-                    return
+            except Exception as e:
+                self._ai_append("Система", f"Не удалось запустить Ollama: {e}")
+                self._install_btn.setEnabled(True)
+                return
 
             def _later():
                 self._install_btn.setEnabled(True)

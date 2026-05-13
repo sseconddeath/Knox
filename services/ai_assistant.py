@@ -46,12 +46,13 @@ class OllamaAssistant:
     MODEL_SHORT = "llama3.1"
 
     @staticmethod
-    def is_on_disk() -> bool:
-        """Установлена ли Ollama физически на диске."""
+    def find_exe() -> str | None:
+        """Полный путь к настоящему ollama.exe, либо None.
+        Используется и для детектирования (is_on_disk), и для запуска
+        (_install_ollama в UI). Без полного пути запуск через `ollama`
+        в PATH мог выцепить WindowsApps-стаб даже когда настоящая
+        Ollama установлена."""
         import os, shutil
-        # shutil.which может выловить WindowsApps-стаб — 0-байтовый
-        # reparse-point в %LOCALAPPDATA%\Microsoft\WindowsApps\ который
-        # при запуске открывает Store. Отфильтровываем его явно.
         found = shutil.which("ollama")
         if found:
             try:
@@ -59,22 +60,25 @@ class OllamaAssistant:
             except OSError:
                 size = 0
             if size > 0 and "WindowsApps" not in found:
-                return True
+                return found
         local = os.environ.get("LOCALAPPDATA", "")
         prog  = os.environ.get("PROGRAMFILES", "")
-        paths = [
+        candidates = [
             os.path.join(local, "Programs", "Ollama", "ollama.exe"),
             os.path.join(prog,  "Ollama", "ollama.exe"),
         ]
-        # Не просто os.path.exists — заодно требуем что файл не пустой
-        # (мусор от прерванной установки или WindowsApps-стаб не считаем).
-        for p in paths:
+        for p in candidates:
             try:
                 if os.path.exists(p) and os.path.getsize(p) > 0:
-                    return True
+                    return p
             except OSError:
                 pass
-        return False
+        return None
+
+    @staticmethod
+    def is_on_disk() -> bool:
+        """Установлена ли Ollama физически на диске."""
+        return OllamaAssistant.find_exe() is not None
 
     @staticmethod
     def is_running() -> bool:
