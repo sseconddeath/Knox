@@ -221,17 +221,37 @@ class OllamaAssistant:
             # /NORESTART — нам не нужна перезагрузка системы. Ollama
             # ставится в per-user %LOCALAPPDATA%\Programs\Ollama, UAC не
             # запрашивается.
-            proc = subprocess.run(
+            #
+            # Раньше тут было subprocess.run() с timeout=600, который
+            # блокировал worker до выхода OllamaSetup.exe. На практике
+            # Ollama installer после копирования файлов несколько минут
+            # сидит в фоне (поднимает tray-app, регистрирует автозапуск
+            # и т.п.) — файлы уже на диске, юзер по факту может
+            # пользоваться, но UI висит на «Устанавливаем...».
+            # Сейчас запускаем installer detached и поллим is_on_disk():
+            # как только ollama.exe появился — считаем установку готовой.
+            flags = 0
+            if os.name == "nt":
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(
                 [dest, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-                timeout=600,
+                creationflags=flags, close_fds=True,
             )
-            if proc.returncode != 0:
-                return False, (f"Установщик Ollama завершился с ошибкой "
-                               f"(код {proc.returncode})")
-            return True, ("Ollama установлена! Теперь нажмите "
-                          "«Скачать модель» — это ещё ~5 ГБ.")
-        except subprocess.TimeoutExpired:
-            return False, "Установщик Ollama не ответил за 10 минут."
+            # Поллим до 5 минут с шагом 1с. На современных SSD весь
+            # install укладывается в 30-60 сек, медленным дискам
+            # хватит и 5 мин с большим запасом.
+            for _ in range(300):
+                time.sleep(1)
+                if OllamaAssistant.is_on_disk():
+                    return True, (
+                        "Ollama установлена! Теперь нажмите "
+                        "«Скачать модель» — это ещё ~5 ГБ.")
+            return False, (
+                "Установщик Ollama не завершился за 5 минут. "
+                "Проверьте Task Manager — возможно идёт UAC-prompt "
+                "или антивирус блокирует.")
         except PermissionError as e:
             return False, (
                 "Антивирус или предыдущий запуск Ollama держит файл "
