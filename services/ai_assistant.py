@@ -244,27 +244,45 @@ class OllamaAssistant:
     @staticmethod
     def ask(question, context, stream_callback=None):
         try:
+            # 180s вместо 120: первый запрос после `pull` может ждать
+            # загрузку модели в RAM/VRAM до минуты на медленных VM —
+            # с 120s мы бы рвали соединение пока модель ещё грузилась.
             r = requests.post(f"{OllamaAssistant.OLLAMA_URL}/api/chat",
                 json={"model": OllamaAssistant.MODEL, "stream": True,
                       "options": {"temperature": 0.7, "num_ctx": 8192, "num_predict": 4096},
                       "messages": [{"role":"system","content":SYSTEM_PROMPT},
                                    {"role":"user","content":f"[Справочные данные об утечках пользователя — используй ТОЛЬКО если вопрос про безопасность]\n{context}\n\n=== ВОПРОС ===\n{question}"}]},
-                stream=True, timeout=120)
+                stream=True, timeout=180)
+            if r.status_code != 200:
+                msg = (f"Ollama вернула HTTP {r.status_code}. "
+                       f"Перезапустите Ollama через трей.")
+                if stream_callback: stream_callback(msg)
+                return msg
             full = ""
+            ollama_err = ""
             for line in r.iter_lines():
                 if not line: continue
                 data = json.loads(line)
+                # Раньше игнорировали error-поле — юзер видел «Модель не
+                # смогла ответить» вместо реальной причины (model still
+                # loading, out of memory, и т.п.).
+                err = data.get("error")
+                if err:
+                    ollama_err = err
+                    break
                 chunk = data.get("message",{}).get("content","")
                 if chunk:
                     full += chunk
                     if stream_callback: stream_callback(chunk)
                 if data.get("done"): break
+            if ollama_err:
+                msg = f"Ollama: {ollama_err}"
+                if stream_callback: stream_callback(msg)
+                return msg
             if not full.strip():
-                # Модель отдала done=True без content (часто на бессмыслицу
-                # типа «f,j,f»). Иначе UI показывает пустой пузырь и юзер
-                # думает, что приложение зависло.
                 msg = ("Модель не смогла ответить на этот запрос. "
-                       "Попробуйте сформулировать вопрос полнее.")
+                       "Попробуйте сформулировать вопрос полнее или "
+                       "перезапустите Ollama через трей.")
                 if stream_callback: stream_callback(msg)
                 return msg
             return full

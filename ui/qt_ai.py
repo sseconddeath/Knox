@@ -505,6 +505,10 @@ class AIPage(QWidget):
         elif download == "hide":
             self._download_btn.hide()
             self._progress_bar.hide()
+            # Также чистим текстовый лейбл прогресса — иначе после успешной
+            # загрузки модели в карточке провайдера висит «Скачиваю модель
+            # — 100%» поверх статуса «Готово · llama3.1:8b».
+            self._progress_lbl.clear()
 
     def _install_ollama(self):
         self._install_btn.setEnabled(False)
