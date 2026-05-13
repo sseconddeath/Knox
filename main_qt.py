@@ -898,15 +898,26 @@ class MainWindow(QMainWindow):
             self._ipc_server.listen(SINGLE_INSTANCE_KEY)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
 
-        # Авто-проверка обновлений через 5 секунд после старта —
-        # чтобы не тормозить запуск и дать UI отрисоваться. Не блокирует
-        # ничего, без интернета молча отваливается.
+        # Авто-проверка обновлений: первая через 5 секунд после старта
+        # (чтобы не тормозить запуск), потом каждый час пока приложение
+        # открыто. Без этого long-running сессии не видели бы новых
+        # релизов — раньше проверка делалась только на старте.
         self._update_thread = None
         self._update_worker = None
+        self._notified_update_version: str = ""  # последний показанный юзеру
         QTimer.singleShot(5_000, self._check_for_update_async)
+        self._update_recheck_timer = QTimer(self)
+        self._update_recheck_timer.timeout.connect(
+            self._check_for_update_async)
+        self._update_recheck_timer.start(60 * 60 * 1000)  # каждый час
 
     def _check_for_update_async(self):
         if not UPDATER_OK:
+            return
+        # Если предыдущая проверка ещё крутится (network тормозит) —
+        # не запускаем параллельную, дождёмся текущей.
+        if (self._update_thread is not None
+                and self._update_thread.isRunning()):
             return
         # Сохраняем ссылки на QThread/worker как атрибуты, иначе GC
         # снесёт их до того как сигналы успеют долететь.
@@ -922,8 +933,17 @@ class MainWindow(QMainWindow):
         self._update_thread.start()
 
     def _on_update_found(self, info: dict):
+        version = info.get("version", "")
+        # Если юзер уже видел плашку про эту версию в текущей сессии
+        # (и, возможно, нажал «Позже») — не показываем заново на
+        # следующем hourly-recheck'е. Покажем если выйдет ещё более
+        # новая версия.
+        if version and version == self._notified_update_version:
+            self._pending_update = info  # обновляем info на свежее
+            return
+        self._notified_update_version = version
         self._pending_update = info
-        self.update_banner.show_for(info.get("version", ""))
+        self.update_banner.show_for(version)
 
     def _start_update(self):
         info = getattr(self, "_pending_update", None)
