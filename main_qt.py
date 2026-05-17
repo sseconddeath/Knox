@@ -920,6 +920,11 @@ class MainWindow(QMainWindow):
         self._update_worker = None
         self._notified_update_version: str = ""  # последний показанный юзеру
         self._manual_update_check: bool = False  # флаг ручной проверки
+        # Флаг «проверка идёт» вместо probe self._update_thread.isRunning():
+        # после первого же чека тред уходит в deleteLater, и обращение к
+        # нему бросает RuntimeError (deleted C++ object) — из-за этого
+        # апдейтер раньше срабатывал ровно один раз за сессию.
+        self._update_in_progress: bool = False
         QTimer.singleShot(5_000, self._check_for_update_async)
         self._update_recheck_timer = QTimer(self)
         self._update_recheck_timer.timeout.connect(
@@ -933,14 +938,14 @@ class MainWindow(QMainWindow):
             return
         # Если предыдущая проверка ещё крутится (network тормозит) —
         # не запускаем параллельную, дождёмся текущей.
-        if (self._update_thread is not None
-                and self._update_thread.isRunning()):
+        if self._update_in_progress:
             if manual:
                 self._show_version_status("проверяю...")
             return
         if manual:
             self._manual_update_check = True
             self._show_version_status("проверяю...")
+        self._update_in_progress = True
         # Сохраняем ссылки на QThread/worker как атрибуты, иначе GC
         # снесёт их до того как сигналы успеют долететь.
         self._update_thread = QThread(self)
@@ -953,7 +958,15 @@ class MainWindow(QMainWindow):
         self._update_worker.done.connect(self._update_thread.quit)
         self._update_thread.finished.connect(self._update_worker.deleteLater)
         self._update_thread.finished.connect(self._update_thread.deleteLater)
+        self._update_thread.finished.connect(self._on_update_thread_finished)
         self._update_thread.start()
+
+    def _on_update_thread_finished(self):
+        # Сбрасываем флаг и роняем Python-ссылки на уже-удаляемые
+        # C++ объекты, чтобы следующий чек (таймер/клик) прошёл.
+        self._update_in_progress = False
+        self._update_thread = None
+        self._update_worker = None
 
     def _on_update_check_done(self):
         # Эмитится воркером когда обновлений НЕТ. Авто-чек молча
