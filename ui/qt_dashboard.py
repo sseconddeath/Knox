@@ -6,7 +6,7 @@ from typing import Callable
 
 from PySide6.QtCore import (
     Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, Property, QObject,
-    QVariantAnimation, QAbstractAnimation,
+    QVariantAnimation, QAbstractAnimation, QRectF,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
@@ -15,6 +15,48 @@ from PySide6.QtWidgets import (
 )
 
 import core.config as cfg
+
+class _RoundedBar(QWidget):
+    """Прогресс-бар со скруглёнными углами, гарантированно круглый
+    с ПЕРВОГО кадра. У штатного QProgressBar::chunk border-radius
+    рендерится квадратным пока chunk узкий (низкое value в начале
+    анимации) и «доокругляется» только когда расширится — отсюда
+    мигание квадрата на секунду. Здесь рисуем сами: fill всегда не
+    уже своей высоты, поэтому pill-форма видна сразу.
+
+    Анимируемое свойство `frac` (0.0..1.0) — для QPropertyAnimation."""
+
+    def __init__(self, track_color: str, fill_color: str, parent=None):
+        super().__init__(parent)
+        self._track = QColor(track_color)
+        self._fill = QColor(fill_color)
+        self._frac = 0.0
+        self.setFixedHeight(8)
+
+    def _get_frac(self) -> float:
+        return self._frac
+
+    def _set_frac(self, v: float):
+        self._frac = 0.0 if v < 0.0 else (1.0 if v > 1.0 else v)
+        self.update()
+
+    frac = Property(float, _get_frac, _set_frac)
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        w, h = self.width(), self.height()
+        radius = h / 2.0
+        p.setBrush(self._track)
+        p.drawRoundedRect(QRectF(0, 0, w, h), radius, radius)
+        if self._frac > 0:
+            # Минимальная ширина = высота: иначе скруглённый
+            # прямоугольник вырождается в «квадрат» при узком fill.
+            fw = max(float(h), w * self._frac)
+            p.setBrush(self._fill)
+            p.drawRoundedRect(QRectF(0, 0, fw, h), radius, radius)
+        p.end()
 
 def _animate_int(label: QLabel, target: int, duration_ms: int = 900):
     """Count-up анимация для QLabel: текст плавно меняется от текущего числа
@@ -422,34 +464,19 @@ class DashboardPage(QWidget):
         head.addWidget(num)
         rl.addLayout(head)
 
-        # Бар. Масштабируем range ×100, чтобы анимация для маленьких
-        # значений (LeakCheck=2, XposedOrNot=3) была плавной — иначе у
-        # int-property всего 2-3 видимых шага и выглядит как «прыжок».
-        SCALE = 100
-        bar = QProgressBar(row)
-        bar.setFixedHeight(8)
-        bar.setRange(0, (max_count if max_count > 0 else 1) * SCALE)
-        bar.setValue(0)
-        bar.setTextVisible(False)
-        bar.setStyleSheet(f"""
-            QProgressBar {{
-                background: {cfg.BG_ELEVATED};
-                border: none;
-                border-radius: 4px;
-            }}
-            QProgressBar::chunk {{
-                background: {color};
-                border-radius: 4px;
-            }}
-        """)
+        # Кастомный бар: скруглён с первого кадра (см. _RoundedBar).
+        # Анимируем float-свойство frac 0..1 — плавно даже для мелких
+        # значений (LeakCheck=2, XposedOrNot=3), SCALE-хак не нужен.
+        maxc = max_count if max_count > 0 else 1
+        bar = _RoundedBar(cfg.BG_ELEVATED, color, row)
         rl.addWidget(bar)
 
         # Каскадное заполнение: первый бар через 350мс, каждый следующий
         # на 160мс позже. OutCubic мягче OutQuart — нет жёсткой остановки
         # к концу. Длительность 1500мс — спокойнее воспринимается глазом.
-        anim = QPropertyAnimation(bar, b"value", row)
-        anim.setStartValue(0)
-        anim.setEndValue(cnt * SCALE)
+        anim = QPropertyAnimation(bar, b"frac", row)
+        anim.setStartValue(0.0)
+        anim.setEndValue(cnt / maxc)
         anim.setDuration(1500)
         anim.setEasingCurve(QEasingCurve.OutCubic)
         delay = 350 + index * 160
